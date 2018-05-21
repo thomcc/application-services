@@ -11,11 +11,17 @@
     "Welcome": "Welcome",
     "doc1": "Docs",
     "Docs": "Docs",
+    "sync/tps-tests": "TPS Tests",
+    "TPS Tests": "TPS Tests",
+    "sync/welcome": "About Sync",
     "Blog": "Blog",
     "GitHub": "GitHub",
     "Accounts": "Accounts",
+    "Sync": "Sync",
     "Firefox Accounts": "Firefox Accounts",
-    "Other Features": "Other Features"
+    "Other Features": "Other Features",
+    "Firefox Sync": "Firefox Sync",
+    "Testing": "Testing"
   },
   "pages-strings": {
     "Help Translate|recruit community translators for your project": "Help Translate",

@@ -1,6 +1,7 @@
 {
   "docs": {
-    "Accounts": ["accounts/welcome"]
+    "Accounts": ["accounts/welcome"],
+    "Sync": ["sync/welcome"]
   },
   "accounts": {
     "Firefox Accounts": [
@@ -9,6 +10,14 @@
     ],
     "Other Features": [
       "accounts/end-to-end-encryption"
+    ]
+  },
+  "sync": {
+    "Firefox Sync": [
+      "sync/welcome"
+    ],
+    "Testing": [
+      "sync/tps-tests"
     ]
   }
 }

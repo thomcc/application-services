@@ -4,7 +4,7 @@
 
 import Foundation
 
-public class RustError: RustStructPointer<ErrorC> {
+class RustError: RustStructPointer<ErrorC> {
    override func cleanup(pointer: UnsafeMutablePointer<ErrorC>) {
         free_extern_error(pointer)
     }

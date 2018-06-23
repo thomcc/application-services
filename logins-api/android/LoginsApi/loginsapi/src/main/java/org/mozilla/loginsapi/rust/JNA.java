@@ -16,8 +16,52 @@ public interface JNA extends Library {
     NativeLibrary JNA_NATIVE_LIB = NativeLibrary.getInstance(JNA_LIBRARY_NAME);
 
     JNA INSTANCE = (JNA) Native.loadLibrary(JNA_LIBRARY_NAME, JNA.class);
+    // Important: If you're returning a string which later needs to be freed, do not return a
+    // String! This will appear to work, but corrupt one or both heaps (rust doesn't use the native
+    // heap by default). What's happening under the hood is JNA is copying the memory from the
+    // pointer returned by your call into a Java String, and then promptly dropping that pointer on
+    // the floor. This is a memory leak (but it gets worse). Then, when you destroy the String, it
+    // does the same thing in reverse -- it allocates a temporary block of memory, copies the String
+    // into it, and passes a pointer to that memory to native code. And then after the native code
+    // returns, it frees said memory. The two problems with this are:
+    //
+    // 1. Rust uses a different heap than Android, so you're freeing a pointer on the wrong heap,
+    //    which is extremely likely to corrupt both heaps.
+    //
+    // 2. Even if it weren't (you can configure Rust to use the System heap instead of using the
+    //    Jemalloc heap), both you and the JNA code are freeing this memory. A double free! Fun.
+    //
+    // The way to avoid this is:
+    //
+    // ```java
+    // // In JNA.java
+    // Pointer thing_returning_str(/* args or whatever go here */);
+    // void destroy_c_char(Pointer p);
+    //
+    // // In some utility code:
+    // public static String getAndConsumeString(Pointer p) {
+    //   Pointer p = JNA.INSTANCE.thing_returning_str(arg0, arg1, arg2);
+    //   try {
+    //     return p.readString(0, "utf8");
+    //   } finally {
+    //     JNI.INSTANCE.destroy_c_char(p);
+    //   }
+    // }
+    //
+    // // Usage code:
+    // String myString = Util.getAndConsumeString(JNA.INSTANCE.thing_returning_str());
+    // // ...
+    // ```
+    //
+    // Note that this only applies to cases where you are later expected to free the pointer. If you
+    // had a case where you don't need to free the pointer, it can safely return a String and
+    // everything will "Just Work".
+    //
+    // That said, you will basically always be expected to free the pointer from Rust code. Rust's
+    // strings are not null terminated, so we can just return a pointer to a string managed by rust,
+    // we need to copy it into something else. We don't know when that copy will no longer be in use
+    // by the caller, so it gets to be the caller's responsibility to free.
+    Pointer get(String id);
 
-    String get(String id);
-
-    void destroy_c_char(String s);
+    void destroy_c_char(Pointer p);
 }

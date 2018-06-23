@@ -23,10 +23,14 @@ class LoginsStore {
     }
 
     fun get(id: String): ServerPassword {
-        val json = JNA.INSTANCE.get(id)
-        val serverPassword = Klaxon().parse<ServerPassword>(json)!!
-        JNA.INSTANCE.destroy_c_char(json)
-        return serverPassword
+        val p = JNA.INSTANCE.get(id)
+        try {
+            val json = p.getString(0, "utf-8");
+            val serverPassword = Klaxon().parse<ServerPassword>(json)!!
+            return serverPassword;
+        } finally {
+            JNA.INSTANCE.destroy_c_char(p);
+        }
     }
 }
 

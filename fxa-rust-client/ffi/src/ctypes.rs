@@ -4,6 +4,7 @@
 
 use fxa_client::http_client::ProfileResponse;
 use fxa_client::{OAuthInfo, SyncKeys};
+use fxa_str_free;
 use libc::c_char;
 use std;
 use util::*;
@@ -12,6 +13,13 @@ use util::*;
 pub struct SyncKeysC {
     pub sync_key: *mut c_char,
     pub xcs: *mut c_char,
+}
+
+impl Drop for SyncKeysC {
+    fn drop(&mut self) {
+        fxa_str_free(self.sync_key);
+        fxa_str_free(self.xcs);
+    }
 }
 
 impl From<SyncKeys> for SyncKeysC {
@@ -28,6 +36,14 @@ pub struct OAuthInfoC {
     pub access_token: *mut c_char,
     pub keys: *mut c_char,
     pub scope: *mut c_char,
+}
+
+impl Drop for OAuthInfoC {
+    fn drop(&mut self) {
+        fxa_str_free(self.access_token);
+        fxa_str_free(self.keys);
+        fxa_str_free(self.scope);
+    }
 }
 
 impl From<OAuthInfo> for OAuthInfoC {
@@ -49,6 +65,16 @@ pub struct ProfileC {
     pub uid: *mut c_char,
     pub email: *mut c_char,
     pub avatar: *mut c_char,
+    pub display_name: *mut c_char,
+}
+
+impl Drop for ProfileC {
+    fn drop(&mut self) {
+        fxa_str_free(self.uid);
+        fxa_str_free(self.email);
+        fxa_str_free(self.avatar);
+        fxa_str_free(self.display_name);
+    }
 }
 
 impl From<ProfileResponse> for ProfileC {
@@ -57,6 +83,9 @@ impl From<ProfileResponse> for ProfileC {
             uid: string_to_c_char(profile.uid),
             email: string_to_c_char(profile.email),
             avatar: string_to_c_char(profile.avatar),
+            display_name: profile
+                .display_name
+                .map_or(std::ptr::null_mut(), |s| string_to_c_char(s)),
         }
     }
 }

@@ -16,23 +16,23 @@ tasks:
         - '-c'
         - >-
           apt-get update && apt-get install zip -y &&
-          git clone {{event.head.repo.url}} repo &&
+          git clone '{{ event.head.repo.url }}' repo &&
           cd repo &&
           git config advice.detachedHead false &&
-          git checkout {{event.head.sha}} &&
+          git checkout '{{ event.version }}' &&
           mkdir -p .cargo &&
           yes | cp -rf scripts/taskcluster-cargo-config .cargo/config &&
           cd libs/ && ./build-all.sh android && cd .. &&
           ./scripts/taskcluster-android.sh &&
-          zip -r fxa_client_android.zip fxa-client &&
-          zip -r fxa_client_android_deps.zip fxa-client-deps
+          cd fxa-client && zip -r fxa_client_android.zip * && cd .. &&
+          cd fxa-client-deps && zip -r fxa_client_android_deps.zip * && cd ..
       artifacts:
         'public/bin/mozilla/fxa_client_android_{{ event.version }}.zip':
           type: 'file'
-          path: '/repo/fxa_client_android.zip'
+          path: '/repo/fxa-client/fxa_client_android.zip'
         'public/bin/mozilla/fxa_client_android_deps_{{ event.version }}.zip':
           type: 'file'
-          path: '/repo/fxa_client_android_deps.zip'
+          path: '/repo/fxa-client-deps/fxa_client_android_deps.zip'
     routes:
       - index.project.fxaclient.builds.{{ event.version }}
     metadata:

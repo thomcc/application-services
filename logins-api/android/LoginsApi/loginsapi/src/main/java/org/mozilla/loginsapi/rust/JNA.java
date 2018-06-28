@@ -9,10 +9,12 @@ import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLibrary;
 import com.sun.jna.Pointer;
+import com.sun.jna.PointerType;
 import com.sun.jna.ptr.NativeLongByReference;
 
 public interface JNA extends Library {
     String JNA_LIBRARY_NAME = "loginsapi_ffi";
+
     NativeLibrary JNA_NATIVE_LIB = NativeLibrary.getInstance(JNA_LIBRARY_NAME);
 
     JNA INSTANCE = (JNA) Native.loadLibrary(JNA_LIBRARY_NAME, JNA.class);
@@ -61,7 +63,37 @@ public interface JNA extends Library {
     // strings are not null terminated, so we can just return a pointer to a string managed by rust,
     // we need to copy it into something else. We don't know when that copy will no longer be in use
     // by the caller, so it gets to be the caller's responsibility to free.
-    Pointer get(String id);
+
+    class RawLoginSyncState extends PointerType {}
+
+    RawLoginSyncState sync15_logins_state_new(
+            String mentat_db_path,
+            String metadata_path,
+
+            String key_id,
+            String access_token,
+            String sync_key,
+            String token_server_base_url,
+
+            RustError.ByReference error
+    );
+
+    void sync15_logins_state_destroy(RawLoginSyncState p);
+
+    // Returns null if the id does not exist, otherwise json
+    Pointer sync15_logins_get_by_id(RawLoginSyncState state, String id, RustError.ByReference error);
+
+    // return json array
+    Pointer sync15_logins_get_all(RawLoginSyncState state, RustError.ByReference error);
+
+    void sync15_logins_sync(RawLoginSyncState state, RustError.ByReference error);
+
+    void sync15_logins_wipe(RawLoginSyncState state, RustError.ByReference error);
+    void sync15_logins_reset(RawLoginSyncState state, RustError.ByReference error);
+
+    void sync15_logins_touch(RawLoginSyncState state, String id, RustError.ByReference error);
+    void sync15_logins_delete(RawLoginSyncState state, String id, RustError.ByReference error);
 
     void destroy_c_char(Pointer p);
+
 }

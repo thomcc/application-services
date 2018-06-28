@@ -3,33 +3,122 @@ package org.mozilla.loginsapi
 import org.mozilla.loginsapi.rust.JNA
 import android.util.Log
 import com.beust.klaxon.Klaxon
+import com.beust.klaxon.Parser
+import com.sun.jna.Pointer
+import org.mozilla.loginsapi.rust.RustError
+import java.io.Closeable
+
 
 class Api {
     companion object {
-        fun createLoginsStore(): LoginsStore {
+        init {
+            System.loadLibrary("crypto")
+            System.loadLibrary("ssl")
+            System.loadLibrary("loginsapi_ffi")
+        }
+        fun createLoginsStore(databasePath: String,
+                              metadataPath: String,
+                              kid: String,
+                              accessToken: String,
+                              syncKey: String,
+                              tokenserverURL: String): LoginsStore {
             Log.d("API", "in the module")
-            return LoginsStore()
+            val rawStore = LoginsStore.withErrorCheck { error ->
+                JNA.INSTANCE.sync15_logins_state_new(
+                        databasePath,
+                        metadataPath,
+                        kid,
+                        accessToken,
+                        syncKey,
+                        tokenserverURL,
+                        error
+                )
+            }
+            return LoginsStore(rawStore)
         }
     }
 }
 
-class LoginsStore {
-    fun prepare() {
+class RustException(msg: String): Exception(msg) {}
 
+class LoginsStore(private var raw: JNA.RawLoginSyncState?) : Closeable {
+
+    fun sync() {
+        withErrorCheck { JNA.INSTANCE.sync15_logins_sync(this.raw!!, it) }
     }
 
-    fun list() {
-
+    fun reset() {
+        withErrorCheck { JNA.INSTANCE.sync15_logins_reset(this.raw!!, it) }
     }
 
-    fun get(id: String): ServerPassword {
-        val p = JNA.INSTANCE.get(id)
-        try {
-            val json = p.getString(0, "utf-8");
-            val serverPassword = Klaxon().parse<ServerPassword>(json)!!
-            return serverPassword;
-        } finally {
-            JNA.INSTANCE.destroy_c_char(p);
+    fun wipe() {
+        withErrorCheck { JNA.INSTANCE.sync15_logins_wipe(this.raw!!, it) }
+    }
+
+    fun delete(id: String) {
+        withErrorCheck { error ->
+            JNA.INSTANCE.sync15_logins_delete(this.raw!!, id, error)
+        }
+    }
+
+    fun get(id: String): ServerPassword? {
+        val json = withErrorCheckedString { error ->
+            JNA.INSTANCE.sync15_logins_get_by_id(this.raw!!, id, error)
+        } ?: return null
+        return Klaxon().parse<ServerPassword>(json)!!
+    }
+
+    fun touch(id: String) {
+        withErrorCheck { error ->
+            JNA.INSTANCE.sync15_logins_touch(this.raw!!, id, error)
+        }
+    }
+
+    fun list(): List<ServerPassword> {
+        val json = withErrorCheckedString {
+            JNA.INSTANCE.sync15_logins_get_all(this.raw!!, it)
+        }!!
+        Log.d("Logins", "got list: " + json);
+        return Klaxon().parseArray<ServerPassword>(json)!!
+    }
+
+    override fun close() {
+        if (this.raw != null) {
+            JNA.INSTANCE.sync15_logins_state_destroy(this.raw)
+            this.raw = null
+        }
+    }
+
+    // This says it's unused but apparently this is how you add a finalizer in kotlin.
+    // No override or anything
+    fun finalize() {
+        this.close()
+    }
+
+    companion object {
+        fun getAndConsumeString(p: Pointer?): String? {
+            if (p == null) {
+                return null;
+            }
+            try {
+                return p.getString(0, "utf8");
+            } finally {
+                JNA.INSTANCE.destroy_c_char(p);
+            }
+        }
+
+        fun <T> withErrorCheck(callback: (RustError.ByReference) -> T): T {
+            val error = RustError.ByReference();
+            val result = callback(error);
+            if (error.isFailure) {
+                Log.e("LoginsAPI", "Call failed!");
+                throw RustException(error.consumeErrorMessage());
+            }
+            return result;
+        }
+
+        fun withErrorCheckedString(callback: (RustError.ByReference) -> Pointer?): String? {
+            return getAndConsumeString(withErrorCheck { error -> callback(error) })
         }
     }
 }

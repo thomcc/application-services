@@ -25,6 +25,8 @@ import org.mozilla.loginsapi.ServerPassword
 import android.content.pm.PackageManager
 import android.Manifest.permission
 import android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+import android.annotation.SuppressLint
+import android.content.Context
 import android.support.v4.content.ContextCompat
 import java.io.*
 
@@ -110,24 +112,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // We expect you to put credentials.json right in the sdcard root so...
+    @SuppressLint("SdCardPath")
     fun initFromCredentials(): LoginsStore {
-        val sdcard = Environment.getExternalStorageDirectory()
         val file = File("/sdcard/credentials.json")
         // The format is a bit weird so I'm not sure if I can map this make klaxon do the
         // deserializing for us...
         val o = Parser().parse(file.inputStream()) as JsonObject
         val info = o.obj("keys")!!.obj("https://identity.mozilla.com/apps/oldsync")!!
+        val appFiles = this.applicationContext.getExternalFilesDir(null)
         val store = Api.createLoginsStore(
-                databasePath   = sdcard.absolutePath + "/logins.mentatdb",
-                metadataPath   = sdcard.absolutePath + "/login-metadata.json",
+                databasePath   = appFiles.absolutePath + "/logins.mentatdb",
+                metadataPath   = appFiles.absolutePath + "/login-metadata.json",
+                databaseKey    = "my_secret_key",
                 kid            = info.string("kid")!!,
                 accessToken    = o.string("access_token")!!,
                 syncKey        = info.string("k")!!,
                 tokenserverURL = "https://oauth-sync.dev.lcip.org/syncserver/token"
-        );
-        store.wipe();
-        return store;
-
+        )
+        return store
     }
-
 }

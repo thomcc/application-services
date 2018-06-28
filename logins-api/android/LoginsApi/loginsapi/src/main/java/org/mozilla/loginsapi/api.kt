@@ -14,10 +14,12 @@ class Api {
         init {
             System.loadLibrary("crypto")
             System.loadLibrary("ssl")
+            System.loadLibrary("sqlcipher")
             System.loadLibrary("loginsapi_ffi")
         }
         fun createLoginsStore(databasePath: String,
                               metadataPath: String,
+                              databaseKey: String,
                               kid: String,
                               accessToken: String,
                               syncKey: String,
@@ -27,6 +29,7 @@ class Api {
                 JNA.INSTANCE.sync15_logins_state_new(
                         databasePath,
                         metadataPath,
+                        databaseKey,
                         kid,
                         accessToken,
                         syncKey,
@@ -44,18 +47,22 @@ class RustException(msg: String): Exception(msg) {}
 class LoginsStore(private var raw: JNA.RawLoginSyncState?) : Closeable {
 
     fun sync() {
+        Log.d("LoginsAPI", "sync")
         withErrorCheck { JNA.INSTANCE.sync15_logins_sync(this.raw!!, it) }
     }
 
     fun reset() {
+        Log.d("LoginsAPI", "reset")
         withErrorCheck { JNA.INSTANCE.sync15_logins_reset(this.raw!!, it) }
     }
 
     fun wipe() {
+        Log.d("LoginsAPI", "wipe")
         withErrorCheck { JNA.INSTANCE.sync15_logins_wipe(this.raw!!, it) }
     }
 
     fun delete(id: String) {
+        Log.d("LoginsAPI", "delete by id")
         withErrorCheck { error ->
             JNA.INSTANCE.sync15_logins_delete(this.raw!!, id, error)
         }
@@ -69,12 +76,14 @@ class LoginsStore(private var raw: JNA.RawLoginSyncState?) : Closeable {
     }
 
     fun touch(id: String) {
+        Log.d("LoginsAPI", "touch by id")
         withErrorCheck { error ->
             JNA.INSTANCE.sync15_logins_touch(this.raw!!, id, error)
         }
     }
 
     fun list(): List<ServerPassword> {
+        Log.d("LoginsAPI", "list all")
         val json = withErrorCheckedString {
             JNA.INSTANCE.sync15_logins_get_all(this.raw!!, it)
         }!!

@@ -69,6 +69,7 @@ public interface JNA extends Library {
     RawLoginSyncState sync15_logins_state_new(
             String mentat_db_path,
             String metadata_path,
+            String encryption_key,
 
             String key_id,
             String access_token,

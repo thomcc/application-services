@@ -7,7 +7,7 @@ use ffi_support::{
     rust_string_from_c, ConcurrentHandleMap, ExternError,
 };
 use places::history_sync::store::HistoryStore;
-use places::{db::PlacesInterruptHandle, storage, PlacesDb};
+use places::{storage, PlacesDb, PlacesInterruptHandle};
 use sync15::telemetry;
 
 use std::os::raw::c_char;

@@ -170,10 +170,11 @@ fn plan_incoming_record(
     }
 }
 
-pub fn apply_plan(
+pub(crate) fn apply_plan(
     conn: &Connection,
     inbound: IncomingChangeset,
     telem: &mut telemetry::EngineIncoming,
+    scope: &crate::db::InterruptScope,
 ) -> Result<OutgoingChangeset> {
     // for a first-cut, let's do this in the most naive way possible...
     let mut plans: Vec<(SyncGuid, IncomingPlan)> = Vec::with_capacity(inbound.changes.len());
@@ -195,11 +196,14 @@ pub fn apply_plan(
         let guid = item.guid.clone();
         plans.push((guid, plan));
     }
+    scope.err_if_interrupted()?;
 
     let tx = conn.unchecked_transaction()?;
 
     let mut outgoing = OutgoingChangeset::new("history".into(), inbound.timestamp);
     for (guid, plan) in plans {
+        scope.err_if_interrupted()?;
+
         match &plan {
             IncomingPlan::Skip => {
                 log::trace!("incoming: skipping item {:?}", guid);
@@ -256,6 +260,7 @@ pub fn apply_plan(
         log::trace!("outgoing {:?}", payload);
         outgoing.changes.push(payload);
     }
+    scope.err_if_interrupted()?;
     tx.commit()?;
 
     log::info!("incoming: {}", serde_json::to_string(&telem).unwrap());

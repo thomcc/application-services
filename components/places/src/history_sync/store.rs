@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use crate::db::{InterruptScope, PlacesDb};
 use crate::error::*;
 use crate::storage::history::history_sync::reset_storage;
 use rusqlite::types::{FromSql, ToSql};
@@ -25,15 +26,17 @@ static GLOBAL_STATE_META_KEY: &'static str = "history_global_state";
 
 // Lifetime here seems wrong
 pub struct HistoryStore<'a> {
-    pub db: &'a Connection,
+    pub db: &'a PlacesDb,
     pub client_info: Cell<Option<ClientInfo>>,
+    scope: InterruptScope,
 }
 
 impl<'a> HistoryStore<'a> {
-    pub fn new(db: &'a Connection) -> Self {
+    pub fn new(db: &'a PlacesDb) -> Self {
         Self {
             db,
             client_info: Cell::new(None),
+            scope: db.begin_interrupt_scope(),
         }
     }
 
@@ -46,6 +49,7 @@ impl<'a> HistoryStore<'a> {
     }
 
     fn get_meta<T: FromSql>(&self, key: &str) -> Result<Option<T>> {
+        self.scope.err_if_interrupted()?;
         Ok(self.try_query_row(
             "SELECT value FROM moz_meta WHERE key = :key",
             &[(":key", &key as &ToSql)],
@@ -59,11 +63,13 @@ impl<'a> HistoryStore<'a> {
         inbound: IncomingChangeset,
         incoming_telemetry: &mut telemetry::EngineIncoming,
     ) -> Result<OutgoingChangeset> {
+        self.scope.err_if_interrupted()?;
         let timestamp = inbound.timestamp;
-        let outgoing = apply_plan(&self, inbound, incoming_telemetry)?;
+        let outgoing = apply_plan(&self, inbound, incoming_telemetry, &self.scope)?;
         // write the timestamp now, so if we are interrupted creating outgoing
         // changesets we don't need to re-reconcile what we just did.
         self.put_meta(LAST_SYNC_META_KEY, &(timestamp.as_millis() as i64))?;
+        self.scope.err_if_interrupted()?;
         Ok(outgoing)
     }
 
@@ -76,6 +82,7 @@ impl<'a> HistoryStore<'a> {
             "sync completed after uploading {} records",
             records_synced.len()
         );
+        self.scope.err_if_interrupted()?;
         finish_plan(&self.db)?;
 
         // write timestamp to reflect what we just wrote.
@@ -111,6 +118,7 @@ impl<'a> HistoryStore<'a> {
         sync_ping: &mut telemetry::SyncTelemetryPing,
     ) -> Result<()> {
         let global_state: Cell<Option<String>> = Cell::new(self.get_global_state()?);
+        self.scope.err_if_interrupted()?;
         let result = sync_multiple(
             &[self],
             &global_state,

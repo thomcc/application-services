@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "reqwest")]
 mod reqwest;
 
-mod ffi;
+pub(crate) mod ffi;
 
 // We allow globally forcing us to use the FFI backend for better
 // testing, for example.

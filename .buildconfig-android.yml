@@ -41,18 +41,18 @@ projects:
     artifactId: sync15
     publishedArtifacts: [sync15, sync15-withoutLib]
     description: Shared Sync types for Kotlin.
-  lockbox-megazord:
-    uploadSymbols: true
-    path: megazords/lockbox/android
-    artifactId: lockbox-megazord
-    publishedArtifacts: [lockbox-megazord, lockbox-megazord-forUnitTests]
-    description: Megazord of [fxaclient, logins, logging].
-  reference-browser-megazord:
-    uploadSymbols: true
-    path: megazords/reference-browser/android
-    artifactId: reference-browser-megazord
-    publishedArtifacts: [reference-browser-megazord, reference-browser-megazord-forUnitTests]
-    description: Megazord of [fxaclient, logins, places, push, logging].
+  # lockbox-megazord:
+  #   uploadSymbols: true
+  #   path: megazords/lockbox/android
+  #   artifactId: lockbox-megazord
+  #   publishedArtifacts: [lockbox-megazord, lockbox-megazord-forUnitTests]
+  #   description: Megazord of [fxaclient, logins, logging].
+  # reference-browser-megazord:
+  #   uploadSymbols: true
+  #   path: megazords/reference-browser/android
+  #   artifactId: reference-browser-megazord
+  #   publishedArtifacts: [reference-browser-megazord, reference-browser-megazord-forUnitTests]
+  #   description: Megazord of [fxaclient, logins, places, push, logging].
   fenix-megazord:
     uploadSymbols: true
     path: megazords/fenix/android

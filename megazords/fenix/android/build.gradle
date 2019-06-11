@@ -67,7 +67,7 @@ cargo {
 
     // Perform release builds (which should have debug info, due to
     // `debug = true` in Cargo.toml).
-    profile = "release"
+    profile = "debug"
 
     extraCargoBuildArguments = rootProject.ext.extraCargoBuildArguments
 

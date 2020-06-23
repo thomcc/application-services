@@ -4,7 +4,6 @@
 
 use crate::util;
 use bitflags::bitflags;
-use caseless::Caseless;
 use rusqlite::{
     self,
     types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef},
@@ -131,6 +130,104 @@ fn dubious_to_ascii_lower(c: u8) -> u8 {
     c | 0x20
 }
 
+/// SWAR-optimized comparison of `token` and `source` at the same time.
+///
+/// Semantically a bit wonky, mainly because optimized, and only intended
+/// only for use inside `string_match`, which it knows can
+///
+/// What it wants to do, is compare `token` and `source`, and find the first
+/// bytes that differ, and either: A) determine that there's definitely
+/// no way these bytes are the same after lower casing (they're both ascii and
+/// `dubious_to_ascii_lower(a) != dubious_to_ascii_lower(b)`), or B)
+/// return slices of those bytes to the end of the strings.
+///
+/// However, it's optimized to compare multiple bytes at a time, and knows
+/// that it's going to be called from a function that knows how to perform
+/// a more exhaustive check for this stuff, so it returns as soon as it
+/// sees a word that contains a byte that fails that test.
+///
+/// Note that while it uses (something equivalent to) dubious_ascii_to_lower, it
+/// only does so for rejecting the possibility that two strings match.
+#[inline]
+fn skip_identical<'t, 's>(token: &'t str, source: &'s str) -> Option<(&'t str, &'s str)> {
+    // Test all bytes of `x` simultaneously to see if they're nonascii.
+    #[inline(always)]
+    fn contains_nonascii(x: usize) -> bool {
+        const NONASCII_MASK: usize = 0x80808080_80808080u64 as usize;
+        (x & NONASCII_MASK) != 0
+    }
+
+    let t = token.as_bytes().as_ptr();
+    let s = source.as_bytes().as_ptr();
+    let mut ti = 0;
+    let mut si = 0;
+    let te = token.len();
+    let se = source.len();
+    let size_of_usize = std::mem::size_of::<usize>();
+    while ti + size_of_usize < te && si + size_of_usize < se {
+        // read a single word out of each tu and su. This is safe,
+        // as we've tested that it's inbounds in the loop condition.
+        let tu = unsafe { std::ptr::read_unaligned(t.add(ti) as *const usize) };
+        let su = unsafe { std::ptr::read_unaligned(s.add(si) as *const usize) };
+        if tu == su {
+            // Every byte is identical, we can keep going.
+            ti += size_of_usize;
+            si += size_of_usize;
+        } else {
+            // tu and su are different, see if we can rule out this string match early.
+            // Note: using | instead of || is intentional.
+            if contains_nonascii(tu) | contains_nonascii(su) {
+                // They're unicode so figuring this out is nontrivial. Let the
+                // slower function do it.
+                break;
+            }
+            // Perform `dubious_to_ascii_lower` on every byte of su and tu, and
+            // see if they're the same. If they're still different, there's no way
+            // these strings could possibly match.
+            const LCASE_MASK: usize = 0x20202020_20202020u64 as usize;
+            let tu_lower = tu | LCASE_MASK;
+            let su_lower = su | LCASE_MASK;
+            if tu_lower != su_lower {
+                return None;
+            }
+            break;
+        }
+    }
+    Some((&token[ti..], &source[si..]))
+}
+
+#[inline]
+fn is_ascii(c: u8) -> bool {
+    (c & 0x80) == 0
+}
+
+#[inline]
+fn is_2byte(c: u8) -> bool {
+    (c & 0xE0) == 0xC0
+}
+
+#[inline]
+fn is_3byte(c: u8) -> bool {
+    (c & 0xF0) == 0xE0
+}
+
+#[inline]
+fn is_4byte(c: u8) -> bool {
+    (c & 0xF8) == 0xF0
+}
+
+// gASCIIToLower from nsUnicharUtils. Maps x -> x unless x is uppercase
+// ascii (in which case it lower cases it).
+static ASCII_TO_LOWER: [u8; 128] = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+    0x40, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
+];
 /// A port of nextSearchCandidate in the desktop places's SQLFunctions.cpp:
 ///
 /// > Scan forward through UTF-8 text until the next potential character that
@@ -219,48 +316,85 @@ fn is_on_boundary(text: &str, index: usize) -> bool {
 
 /// Returns true if `source` starts with `token` ignoring case.
 ///
-/// Loose port of stringMatch from places, which we've modified to perform more correct case
-/// folding (if this turns out to be a perf issue we can always address it then).
+/// Originally a port of stringMatch from places, which we've modified to
+/// perform more correct case folding (if this turns out to be a perf issue we
+/// can always address it then), but at this point it's irrelevant
 #[inline]
 fn string_match(token: &str, source: &str) -> bool {
     if source.len() < token.len() {
         return false;
     }
-    let mut ti = token.chars().default_case_fold();
-    let mut si = source.chars().default_case_fold();
-    loop {
-        match (ti.next(), si.next()) {
-            (None, _) => return true,
-            (Some(_), None) => return false,
-            (Some(x), Some(y)) => {
-                if x != y {
-                    return false;
-                }
-            }
+    let (mut token, mut source) = if let Some(tup) = skip_identical(token, source) {
+        tup
+    } else {
+        return false;
+    };
+    // let mut pos_tok = 0;
+    // let mut pos_src = 0;
+    while token.len() != 0 {
+        if source.len() == 0 {
+            return false;
+        }
+        let (tc, ti) = next_codepoint_lower(token);
+        let (sc, si) = next_codepoint_lower(source);
+        if tc != sc {
+            return false;
+        }
+        debug_assert!(ti <= token.len());
+        debug_assert!(si <= source.len());
+        unsafe {
+            token = &token.get_unchecked(ti..);
+            source = &source.get_unchecked(si..);
         }
     }
-}
-
-/// This performs single-codepoint case folding. It will do the wrong thing
-/// for characters which have lowercase equivalents with multiple characters.
-#[inline]
-fn char_to_lower_single(c: char) -> char {
-    c.to_lowercase().next().unwrap()
+    true
 }
 
 /// Read the next codepoint out of `s` and return it's lowercase variant, and the index of the
 /// codepoint after it.
+///
+/// Port of GetLowerUTF8Codepoint_inline from nsUnicharUtils.
 #[inline]
 fn next_codepoint_lower(s: &str) -> (char, usize) {
-    // This is super convoluted, and I wish a more direct way to do it was exposed. (In theory
-    // this should be more efficient than this implementation is)
-    let mut indices = s.char_indices();
-    let (_, next_char) = indices.next().unwrap();
-    let next_index = indices
-        .next()
-        .map(|(index, _)| index)
-        .unwrap_or_else(|| s.len());
-    (char_to_lower_single(next_char), next_index)
+    let s = s.as_bytes();
+    let c = s[0];
+    if is_ascii(c) {
+        return (ASCII_TO_LOWER[c as usize] as char, 1);
+    }
+
+    // SAFETY: This is safe as all `str` is guaranteed to be valid UTF8.
+    let (uc, len) = unsafe {
+        if is_2byte(c) {
+            // It's a two-byte sequence, so it looks like
+            //  110XXXXX 10XXXXXX.
+            let c2 = ((c as u32 & 0x1F) << 6) + (*s.get_unchecked(1) as u32 & 0x3F);
+            (c2, 2)
+        } else if is_3byte(c) {
+            // It's a three-byte sequence, so it looks like
+            //  1110XXXX 10XXXXXX 10XXXXXX.
+            let c3 = ((c as u32 & 0x0F) << 12)
+                + ((*s.get_unchecked(1) as u32 & 0x3F) << 6)
+                + (*s.get_unchecked(2) as u32 & 0x3F);
+            (c3, 3)
+        } else if is_4byte(c) {
+            // It's a four-byte sequence, so it looks like
+            //   11110XXX 10XXXXXX 10XXXXXX 10XXXXXX.
+            let c4 = ((c as u32 & 0x07) << 18)
+                + ((*s.get_unchecked(1) as u32 & 0x3F) << 12)
+                + ((*s.get_unchecked(2) as u32 & 0x3F) << 6)
+                + (*s.get_unchecked(3) as u32 & 0x3F);
+            (c4, 4)
+        } else {
+            unreachable!("Invalid utf-8 sequence in str!")
+        }
+    };
+    (
+        unsafe { std::char::from_u32_unchecked(uc) }
+            .to_lowercase()
+            .next()
+            .unwrap(),
+        len,
+    )
 }
 
 // Port of places `findInString`.

@@ -18,11 +18,13 @@ use crate::types::SyncStatus;
 use rusqlite::NO_PARAMS;
 use sql_support::ConnExt;
 
-const VERSION: i64 = 12;
+const VERSION: i64 = 13;
 
 // Shared schema and temp tables for the read-write and Sync connections.
 const CREATE_SHARED_SCHEMA_SQL: &str = include_str!("../../sql/create_shared_schema.sql");
 const CREATE_SHARED_TEMP_TABLES_SQL: &str = include_str!("../../sql/create_shared_temp_tables.sql");
+
+const CREATE_FTS_SQL: &str = include_str!("../../sql/create_fts.sql");
 
 // Sync-specific temp tables and triggers.
 const CREATE_SYNC_TEMP_TABLES_SQL: &str = include_str!("../../sql/create_sync_temp_tables.sql");
@@ -40,6 +42,7 @@ lazy_static::lazy_static! {
             decrease_frecency_stats = update_origin_frecency_stats("-"),
         )
     };
+
 }
 
 // Keys in the moz_meta table.
@@ -181,7 +184,7 @@ fn upgrade(db: &PlacesDb, from: i64) -> Result<()> {
         &[
             // Previous versions had an incomplete version of moz_bookmarks.
             "DROP TABLE moz_bookmarks",
-            CREATE_SHARED_SCHEMA_SQL,
+            CREATE_SHARED_SCHEMA_SQL
         ],
         || create_bookmark_roots(&db.conn()),
     )?;
@@ -199,6 +202,7 @@ fn upgrade(db: &PlacesDb, from: i64) -> Result<()> {
             "DROP TABLE moz_bookmarks_synced",
             "DROP TABLE moz_bookmarks_synced_structure",
             CREATE_SHARED_SCHEMA_SQL,
+            CREATE_FTS_SQL,
         ],
         || Ok(()),
     )?;
@@ -266,6 +270,13 @@ fn upgrade(db: &PlacesDb, from: i64) -> Result<()> {
         ],
         || Ok(()),
     )?;
+    migration(
+        db,
+        12,
+        13,
+        &[CREATE_FTS_SQL],
+        || Ok(()),
+    )?;
     // Add more migrations here...
 
     if get_current_schema_version(db)? == VERSION {
@@ -277,6 +288,7 @@ fn upgrade(db: &PlacesDb, from: i64) -> Result<()> {
 pub fn create(db: &PlacesDb) -> Result<()> {
     log::debug!("Creating schema");
     db.execute_batch(CREATE_SHARED_SCHEMA_SQL)?;
+    db.execute_batch(CREATE_FTS_SQL)?;
     create_bookmark_roots(&db.conn())?;
     db.execute(
         &format!("PRAGMA user_version = {version}", version = VERSION),

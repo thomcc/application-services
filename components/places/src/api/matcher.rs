@@ -6,7 +6,7 @@ use crate::db::PlacesDb;
 use crate::error::Result;
 pub use crate::match_impl::{MatchBehavior, SearchBehavior};
 use crate::msg_types::{SearchResultMessage, SearchResultReason};
-use rusqlite::{types::ToSql, Row};
+use rusqlite::{types::ToSql, Row, named_params};
 use serde_derive::*;
 use sql_support::{maybe_log_plan, ConnExt};
 use url::Url;
@@ -64,6 +64,7 @@ pub fn search_frecent(conn: &PlacesDb, params: SearchParams) -> Result<Vec<Searc
         &[
             // Try to match on the origin, or the full URL.
             &OriginOrUrl::new(&params.search_string),
+            &FtsQuery::new(&params.search_string),
             // query adaptive matches and suggestions, matching Anywhere.
             &Adaptive::with_behavior(
                 &params.search_string,
@@ -251,6 +252,25 @@ impl SearchResult {
         })
     }
 
+    pub fn from_fts_row(row: &rusqlite::Row<'_>) -> Result<Self> {
+        let reasons = vec![MatchReason::PreviousUse];
+        let search_string = row.get::<_, String>("searchString")?;
+        let url = row.get::<_, String>("url")?;
+        let title = row.get::<_, Option<String>>("title")?;
+        let frecency = row.get::<_, i64>("frecency")?;
+        let url = Url::parse(&url)?;
+
+        Ok(Self {
+            search_string,
+            url,
+            title: title.unwrap_or_default(),
+            icon_url: None,
+            frecency,
+            reasons,
+        })
+
+    }
+
     pub fn from_suggestion_row(row: &rusqlite::Row<'_>) -> Result<Self> {
         let mut reasons = vec![MatchReason::Bookmark];
 
@@ -369,6 +389,49 @@ impl From<MatchReason> for SearchResultReason {
 
 trait Matcher {
     fn search(&self, conn: &PlacesDb, max_results: u32) -> Result<Vec<SearchResult>>;
+}
+
+struct FtsQuery {
+    query: String,
+}
+
+impl FtsQuery {
+    pub fn new(query: &str) -> Self {
+        let escaped = query.split_ascii_whitespace()
+            .map(|w| format!("\"{}\"", w.replace("\"", "")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        Self {
+            query: escaped
+        }
+    }
+}
+
+impl Matcher for FtsQuery {
+    fn search(&self, conn: &PlacesDb, max_results: u32) -> Result<Vec<SearchResult>> {
+        Ok(query_flat_rows_and_then_named(
+            conn,
+            "SELECT h.url as url,
+                    h.title as title,
+                    h.typed as typed,
+                    h.id as id,
+                    h.frecency as frecency,
+                    :searchString AS searchString
+            FROM moz_places h
+            INNER JOIN moz_places_fts
+                ON moz_places_fts.rowid = h.id
+            WHERE
+                moz_places_fts MATCH :searchString
+                AND h.frecency > 0
+            ORDER BY h.frecency DESC
+            LIMIT :maxResults",
+            named_params!{
+                ":searchString": &self.query,
+                ":maxResults": &max_results,
+            },
+            SearchResult::from_fts_row,
+        )?)
+    }
 }
 
 struct OriginOrUrl<'query> {
@@ -595,7 +658,7 @@ impl<'query> Matcher for Suggestions<'query> {
                                      visit_count, h.typed,
                                      bookmarked, NULL,
                                      :matchBehavior, :searchBehavior)
-              AND (+h.visit_count_local > 0 OR +h.visit_count_remote > 0)
+              AND (h.visit_count_local > 0 OR h.visit_count_remote > 0)
             ORDER BY h.frecency DESC, h.id DESC
             LIMIT :maxResults",
             &[
